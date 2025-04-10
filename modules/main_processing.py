@@ -4,6 +4,7 @@ from modules.process_data import *
 import random
 import math
 from geojson import Feature, FeatureCollection
+import fiona
 
 # Function adapted from iabrilvzqz
 # GitHub: https://github.com/Spatial-Data-Science-and-GEO-AI-Lab/StreetView-NatureVisibility-GSV
