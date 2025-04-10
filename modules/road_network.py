@@ -199,7 +199,7 @@ def get_features_on_points(points, road, access_token, max_distance=50, zoom=14)
         if response.status_code == 200:
             data = response.json()
             # Return the compass angle if it exists, else None
-            return data.get("compass_angle", None)
+            return data.get("compass_angle", None)  # Using .get() ensures no KeyError
         else:
             print(f"Error fetching data for image_id {image_id}, Status code: {response.status_code}")
             return None
