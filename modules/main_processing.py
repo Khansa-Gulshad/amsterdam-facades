@@ -296,5 +296,6 @@ def save_usable_wall_ratios(city, usable_ratios):
     # Convert it to a GeoDataFrame and save it as a geopackage
     gdf = gpd.GeoDataFrame.from_features(feature_collection["features"])
     gdf.set_crs('EPSG:4326', allow_override=True, inplace=True)
-    gdf.to_file(f'{features_path}/{features_file}', driver="GPKG", engine="pyogrio")
+    gdf.to_file(f'{features_path}/{features_file}.shp', driver="ESRI Shapefile", engine="fiona")
+
 
