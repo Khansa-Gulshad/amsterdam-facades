@@ -190,8 +190,25 @@ def get_features_on_points(points, road, access_token, max_distance=50, zoom=14)
   # Add camera angle
   header = {'Authorization': 'OAuth {}'.format(access_token)}
 
-  points["camera_angle"] = points.apply(lambda row: requests.get(f'https://graph.mapillary.com/{row["image_id"]}?fields=compass_angle',
-                                                                 headers=header).json().get("compass_angle", None) if row["feature"] else None, axis=1)
+  def get_compass_angle(image_id):
+    try:
+        # Request to Mapillary API
+        response = requests.get(f'https://graph.mapillary.com/{image_id}?fields=compass_angle',
+                                headers=header)
+        # Check if the response was successful and contains the desired field
+        if response.status_code == 200:
+            data = response.json()
+            # Return the compass angle if it exists, else None
+            return data.get("compass_angle", None)
+        else:
+            print(f"Error fetching data for image_id {image_id}, Status code: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Error fetching compass angle for image {image_id}: {str(e)}")
+        return None
+
+# Safely apply the function to each row in the DataFrame
+  points["camera_angle"] = points.apply(lambda row: get_compass_angle(row["image_id"]) if row["feature"] else None, axis=1)
   
   # Add road angle
   points = gpd.sjoin_nearest(points, road, how='left', max_distance = 0.2)
