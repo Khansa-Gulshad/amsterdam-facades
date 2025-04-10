@@ -19,19 +19,18 @@ import networkx as nx
 # Generates a road network from either a placename or bounding box using OpenStreetMap data
 # Also saves the road angle of each road segment
 def get_road_network(city, bbox=None):
-    print(f"Fetching road network for bbox: {bbox}")  # Debug print to check the bbox
+    print(f"Fetching road network for city: {city}")  # Debug print to check the city
     # Use a custom filter to only get car-driveable roads that are not motorways or trunk roads
     cf = '["highway"~"primary|secondary|tertiary|residential|primary_link|secondary_link|tertiary_link|living_street|service|unclassified"]'
 
     try:
-      if bbox:
-        G = ox.graph_from_bbox(bbox[3], bbox[1], bbox[2], bbox[0], simplify=True, custom_filter=cf)
-      else:
-        G = ox.graph_from_place(city, simplify=True, custom_filter=cf)
+        if bbox:
+            G = ox.graph_from_bbox(bbox[3], bbox[1], bbox[2], bbox[0], simplify=True, custom_filter=cf)
+        else:
+            G = ox.graph_from_place(city, simplify=True, custom_filter=cf)
     except:
-      # If there are no roads, return an empty gdf
-      return gpd.GeoDataFrame()
-
+        # If there are no roads, return an empty gdf
+        return gpd.GeoDataFrame()
 
     # Create a set to store unique road identifiers
     unique_roads = set()
@@ -41,28 +40,28 @@ def get_road_network(city, bbox=None):
 
     # Iterate over each road segment
     for u, v, key in G.edges(keys=True):
-      # Check if the road segment is a duplicate
-      if (v, u) in unique_roads:
-        # Remove the duplicate road segment
-        G_simplified.remove_edge(u, v, key)
-      else:
-        # Add the road segment to the set of unique roads
-        unique_roads.add((u, v))
+        # Check if the road segment is a duplicate
+        if (v, u) in unique_roads:
+            # Remove the duplicate road segment
+            G_simplified.remove_edge(u, v, key)
+        else:
+            # Add the road segment to the set of unique roads
+            unique_roads.add((u, v))
 
-        y0, x0 = G.nodes[u]['y'], G.nodes[u]['x']
-        y1, x1 = G.nodes[v]['y'], G.nodes[v]['x']
+            y0, x0 = G.nodes[u]['y'], G.nodes[u]['x']
+            y1, x1 = G.nodes[v]['y'], G.nodes[v]['x']
 
-        # Calculate the angle from North (in radians)
-        angle_from_north = math.atan2(x1 - x0, y1 - y0)
+            # Calculate the angle from North (in radians)
+            angle_from_north = math.atan2(x1 - x0, y1 - y0)
 
-        # Convert the angle to degrees
-        angle_from_north_degrees = math.degrees(angle_from_north)
+            # Convert the angle to degrees
+            angle_from_north_degrees = math.degrees(angle_from_north)
 
-        if angle_from_north_degrees < 0:
-          angle_from_north_degrees += 360.0
-        
-        # Add the road angle as a new attribute to the edge
-        G_simplified.edges[u,v,key]['road_angle'] = angle_from_north_degrees
+            if angle_from_north_degrees < 0:
+                angle_from_north_degrees += 360.0
+
+            # Add the road angle as a new attribute to the edge
+            G_simplified.edges[u, v, key]['road_angle'] = angle_from_north_degrees
 
     # Update the graph with the simplified road network
     G = G_simplified
@@ -71,8 +70,7 @@ def get_road_network(city, bbox=None):
     G_proj = ox.project_graph(G)
 
     # Convert the projected graph to a GeoDataFrame
-    # This function projects the graph to the UTM CRS for the UTM zone in which the graph's centroid lies
-    _ , edges = ox.graph_to_gdfs(G_proj) 
+    _, edges = ox.graph_to_gdfs(G_proj) 
 
     return edges
 
