@@ -285,14 +285,14 @@ def calculate_usable_wall_ratios(features, city, sam, access_token, save_streetv
   return usable_ratio
 
 
-# Saves usable facade ratios (GPS) as a geopackage file
-def save_usable_wall_ratios(city, usable_ratios):
-  # Save points and ratios as GeoJSON FeatureCollection
-  features_file = f'{city}_features.gpkg'
-  features_path = os.path.join("results", city)
-  feature_collection = FeatureCollection(usable_ratios)
 
-  # Convert it to a GeoDataFrame and save it as a geopackage
-  gdf = gpd.GeoDataFrame.from_features(feature_collection["features"])
-  gdf.set_crs('EPSG:4326', inplace=True)
-  gdf.to_file(f'{features_path}/{features_file}', driver="GPKG")
+# Save the usable ratios as a geopackage file
+def save_usable_wall_ratios(city, usable_ratios):
+    features_file = f'{city}_features.gpkg'
+    features_path = os.path.join("results", city)
+    feature_collection = FeatureCollection(usable_ratios)
+
+    # Convert it to a GeoDataFrame and save it as a geopackage
+    gdf = gpd.GeoDataFrame.from_features(feature_collection["features"])
+    gdf.set_crs('EPSG:4326', allow_override=True, inplace=True)
+    gdf.to_file(f'{features_path}/{features_file}', driver="GPKG", engine="fiona")
