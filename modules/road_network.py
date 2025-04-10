@@ -31,12 +31,6 @@ def get_road_network(city, bbox):
       # If there are no roads, return an empty gdf
       return gpd.GeoDataFrame()
 
-    # Print the bbox coordinates and the number of roads found
-    print(f"BBox coords: {bbox}")
-    print(f"Total roads found: {len(G.edges)}")
-
-    if len(G.edges) == 0:
-        print("No roads fetched.")
 
     # Create a set to store unique road identifiers
     unique_roads = set()
