@@ -18,6 +18,14 @@ def create_features(city, bbox, access_token, distance, num_sample_images, begin
     # Get the sample points and the features assigned to each point
     road = get_road_network(city, bbox)
 
+    # Debug prints to check if roads are fetched
+    print(f"BBox coords: {bbox}")
+    print(f"Total roads found: {len(road)}")  # Check the length of roads fetched
+
+    if len(road) == 0:
+        print(f"No roads fetched for bbox {i}. Continuing...")
+        return gpd.GeoDataFrame()  # Return an empty GeoDataFrame
+
     # If there are no roads, there are no features too
     if road.empty:
       return gpd.GeoDataFrame()
