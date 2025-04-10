@@ -18,7 +18,7 @@ import networkx as nx
 # GitHub: https://github.com/Spatial-Data-Science-and-GEO-AI-Lab/StreetView-NatureVisibility-GSV
 # Generates a road network from either a placename or bounding box using OpenStreetMap data
 # Also saves the road angle of each road segment
-def get_road_network(city, bbox):
+def get_road_network(city, bbox=None):
     print(f"Fetching road network for bbox: {bbox}")  # Debug print to check the bbox
     # Use a custom filter to only get car-driveable roads that are not motorways or trunk roads
     cf = '["highway"~"primary|secondary|tertiary|residential|primary_link|secondary_link|tertiary_link|living_street|service|unclassified"]'
