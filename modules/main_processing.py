@@ -9,7 +9,7 @@ from geojson import Feature, FeatureCollection
 # GitHub: https://github.com/Spatial-Data-Science-and-GEO-AI-Lab/StreetView-NatureVisibility-GSV
 # Prepare facade folders, create road network, and create features. 
 # Returns the point features
-def create_features(city, bbox=None, access_token, distance, num_sample_images, begin, end, save_roads_points, i=0):
+def create_features(city, access_token, distance, num_sample_images, begin, end, save_roads_points, bbox=None, i=0):
   print(f"Creating features for bbox {i} with coordinates: {bbox}")  # Debug statement
   # Create file paths for roads and points
   file_path_features = os.path.join("results", city, "points", f"points_{i}.gpkg")
