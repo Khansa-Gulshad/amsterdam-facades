@@ -103,7 +103,7 @@ def calculate_usable_wall_ratios(features, city, sam, access_token, save_streetv
 
           try:
             image_url = data["thumb_original_url"]
-            camera_angle = data["compass_angle"]
+            camera_angle = data["compass_angle"] if "compass_angle" in data else None  # Handle missing compass_angle
             # Location is GeoJSON Point
             location = data["computed_geometry"]
 
