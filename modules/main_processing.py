@@ -10,6 +10,7 @@ from geojson import Feature, FeatureCollection
 # Prepare facade folders, create road network, and create features. 
 # Returns the point features
 def create_features(city, bbox, access_token, distance, num_sample_images, begin, end, save_roads_points, i=0):
+  print(f"Creating features for bbox {i} with coordinates: {bbox}")  # Debug statement
   # Create file paths for roads and points
   file_path_features = os.path.join("results", city, "points", f"points_{i}.gpkg")
   file_path_road = os.path.join("results", city, "roads", f"roads_{i}.gpkg")
