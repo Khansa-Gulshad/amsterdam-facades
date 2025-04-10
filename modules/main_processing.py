@@ -10,58 +10,58 @@ from geojson import Feature, FeatureCollection
 # Prepare facade folders, create road network, and create features. 
 # Returns the point features
 def create_features(city, access_token, distance, num_sample_images, begin, end, save_roads_points, bbox=None, i=0):
-  print(f"Creating features for bbox {i} with coordinates: {bbox}")  # Debug statement
-  # Create file paths for roads and points
-  file_path_features = os.path.join("results", city, "points", f"points_{i}.gpkg")
-  file_path_road = os.path.join("results", city, "roads", f"roads_{i}.gpkg")
+    print(f"Creating features for city {city}")  # Debug statement
+    # Create file paths for roads and points
+    file_path_features = os.path.join("results", city, "points", f"points_{i}.gpkg")
+    file_path_road = os.path.join("results", city, "roads", f"roads_{i}.gpkg")
 
-  if not os.path.exists(file_path_features):
-    # Get the sample points and the features assigned to each point
-    road = get_road_network(city, bbox)
+    if not os.path.exists(file_path_features):
+        # Get the sample points and the features assigned to each point
+        # Use city name only (no bbox)
+        road = get_road_network(city)
 
-    # Debug prints to check if roads are fetched
-    print(f"BBox coords: {bbox}")
-    print(f"Total roads found: {len(road)}")  # Check the length of roads fetched
+        # Debug prints to check if roads are fetched
+        print(f"Total roads found: {len(road)}")  # Check the length of roads fetched
 
-    if len(road) == 0:
-        print(f"No roads fetched for bbox {i}. Continuing...")
-        return gpd.GeoDataFrame()  # Return an empty GeoDataFrame
+        if len(road) == 0:
+            print(f"No roads found for city {city}. Continuing...")
+            return gpd.GeoDataFrame()  # Return an empty GeoDataFrame
 
-    # If there are no roads, there are no features too
-    if road.empty:
-      return gpd.GeoDataFrame()
+        # If there are no roads, there are no features too
+        if road.empty:
+            return gpd.GeoDataFrame()
 
-    # Save road in gpkg file
-    road["index"] = road.index
-    road["index"] = road["index"].astype(str)
-    road["highway"] = road["highway"].astype(str)
-    road["length"] = road["length"].astype(float)
-    road["road_angle"] = road["road_angle"].astype(float)
+        # Save road in gpkg file
+        road["index"] = road.index
+        road["index"] = road["index"].astype(str)
+        road["highway"] = road["highway"].astype(str)
+        road["length"] = road["length"].astype(float)
+        road["road_angle"] = road["road_angle"].astype(float)
 
-    # Create features from the sample points
-    points = select_points_on_road_network(road, distance)
-    features = get_features_on_points(points, road, access_token, distance)
+        # Create features from the sample points
+        points = select_points_on_road_network(road, distance)
+        features = get_features_on_points(points, road, access_token, distance)
 
-    # Save the roads and features if necessary
-    if save_roads_points:
-      road[["index", "geometry", "length", "highway", "road_angle"]].to_file(file_path_road, driver="GPKG", crs=road.crs)
-      features.to_file(file_path_features, driver="GPKG")
-  else:
-    # If the points file already exists, then we use it to continue with the analysis
-    features = gpd.read_file(file_path_features, layer=f"points_{i}")
+        # Save the roads and features if necessary
+        if save_roads_points:
+            road[["index", "geometry", "length", "highway", "road_angle"]].to_file(file_path_road, driver="GPKG", crs=road.crs)
+            features.to_file(file_path_features, driver="GPKG")
+    else:
+        # If the points file already exists, then we use it to continue with the analysis
+        features = gpd.read_file(file_path_features, layer=f"points_{i}")
 
-  # Set True for n randomly selected rows to analyze their images later
-  sample_indices = random.sample(range(len(features)), min(num_sample_images, len(features)))
-  features["save_sample"] = False
-  features.loc[sample_indices, "save_sample"] = True
+    # Set True for n randomly selected rows to analyze their images later
+    sample_indices = random.sample(range(len(features)), min(num_sample_images, len(features)))
+    features["save_sample"] = False
+    features.loc[sample_indices, "save_sample"] = True
 
-  features = features.sort_values(by='id')
+    features = features.sort_values(by='id')
 
-  # If we include a begin and end value, then the dataframe is split and we are going to analyse just those points
-  if begin != None and end != None:
-    features = features.iloc[begin:end]
-  
-  return features
+    # If we include a begin and end value, then the dataframe is split and we are going to analyse just those points
+    if begin != None and end != None:
+        features = features.iloc[begin:end]
+    
+    return features
 
 
 # For each feature, calculates the facade greening potential score (GPS).
