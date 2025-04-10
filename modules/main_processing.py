@@ -288,14 +288,40 @@ def calculate_usable_wall_ratios(features, city, sam, access_token, save_streetv
 
 
 # Save the usable ratios as a geopackage file
+# Save the usable ratios as a geopackage file
 def save_usable_wall_ratios(city, usable_ratios):
-    features_file = f'{city}_features.gpkg'
-    features_path = os.path.join("results", city)
+    # Check if usable_ratios is empty
+    print(len(usable_ratios))  # Check if it's empty
+    if len(usable_ratios) == 0:
+        print("No usable ratios found. Nothing to save.")
+        return  # Exit the function if no usable ratios
+
+    # If usable_ratios is not empty, continue with saving the file
     feature_collection = FeatureCollection(usable_ratios)
 
-    # Convert it to a GeoDataFrame and save it as a geopackage
+    # Convert the feature collection to a GeoDataFrame
     gdf = gpd.GeoDataFrame.from_features(feature_collection["features"])
-    gdf.set_crs('EPSG:4326', allow_override=True, inplace=True)
-    gdf.to_file(f'{features_path}/{features_file}.shp', driver="ESRI Shapefile", engine="fiona")
 
+    # Check the GeoDataFrame to ensure it's correct
+    print(gdf.head())  # Check the first few rows
+    print(gdf.crs)  # Check the CRS
+
+    # Set the CRS to EPSG:4326
+    gdf.set_crs('EPSG:4326', allow_override=True, inplace=True)
+
+    # Check if CRS has been set correctly
+    print(gdf.crs)  # Double-check the CRS
+
+    # Proceed with saving the GeoDataFrame to a geopackage file
+    features_file = f'{city}_features.gpkg'
+    features_path = os.path.join("results", city)
+
+    # Check if the features directory exists, if not, create it
+    if not os.path.exists(features_path):
+        os.makedirs(features_path)
+
+    # Save the GeoDataFrame as a geopackage file
+    gdf.to_file(f'{features_path}/{features_file}', driver="GPKG", engine="fiona")
+
+    print(f"Saved features to {features_file}")
 
