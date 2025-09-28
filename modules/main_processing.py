@@ -81,14 +81,6 @@ def create_features(
     end   = _to_int_or_default(end, None)
     i     = _to_int_or_default(i, 0)
 
-    # robust to None, inf, NaN, strings
-    begin = 0 if (begin is None or (isinstance(begin, float) and math.isinf(begin))) else int(begin)
-    end   = None if (end   is None or (isinstance(end,   float) and math.isinf(end))) else int(end)
-
-    try:
-        i = int(i)
-    except Exception:
-        i = 0
 
     # Explicit layer names for GPKG
     features_layer = f"points_{i}"
@@ -377,6 +369,7 @@ def save_usable_wall_ratios(city, usable_ratios):
     gdf.to_file(os.path.join(features_path, features_file), driver="GPKG", layer="features")
 
     print(f"Saved features to {features_file}")
+
 
 
 
