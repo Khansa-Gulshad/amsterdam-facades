@@ -79,7 +79,9 @@ def get_road_network(city, bbox=None):
 # GitHub: https://github.com/Spatial-Data-Science-and-GEO-AI-Lab/StreetView-NatureVisibility-GSV
 # Get a gdf of points over a road network with a N distance between them
 def select_points_on_road_network(roads, N=50):
+  N = max(1, int(N))
   points = []
+    
   
   # Iterate over each road
   for row in roads.itertuples(index=True, name='Road'):
@@ -233,3 +235,4 @@ def get_features_on_points(points, road, access_token, max_distance=50, zoom=14)
   points.to_crs(epsg=4326, inplace=True)
 
   return points
+
