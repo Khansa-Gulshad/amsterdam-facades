@@ -8,6 +8,7 @@ import fiona
 from PIL import Image
 import requests
 import geopandas as gpd
+import os
 
 # Use Fiona for writes so layer= is supported and no pyogrio 'crs' issue
 gpd.options.io_engine = "fiona"
@@ -55,18 +56,6 @@ def _to_int_or_default(x, default=None):
         except Exception:
             return default
 
-# ---- sanitize numerics ----
-distance = _to_int_or_default(distance, 50)
-
-if _is_inf(num_sample_images) or num_sample_images is None:
-    num_sample_images = 10**9
-else:
-    num_sample_images = _to_int_or_default(num_sample_images, 10**6)
-
-begin = _to_int_or_default(begin, 0)
-end   = _to_int_or_default(end, None)
-i     = _to_int_or_default(i, 0)
-
 def create_features(
     city,
     access_token,
@@ -81,15 +70,16 @@ def create_features(
     print(f"Creating features for city {city}")
 
     # ---- sanitize numerics ----
-    try:
-        distance = int(distance)
-    except Exception:
-        distance = 50
+    distance = _to_int_or_default(distance, 50)
 
-    if num_sample_images in (None, float("inf")):
+    if _is_inf(num_sample_images) or num_sample_images is None:
         num_sample_images = 10**9
     else:
-        num_sample_images = int(num_sample_images)
+        num_sample_images = _to_int_or_default(num_sample_images, 10**6)
+
+    begin = _to_int_or_default(begin, 0)
+    end   = _to_int_or_default(end, None)
+    i     = _to_int_or_default(i, 0)
 
     # robust to None, inf, NaN, strings
     begin = 0 if (begin is None or (isinstance(begin, float) and math.isinf(begin))) else int(begin)
@@ -387,5 +377,6 @@ def save_usable_wall_ratios(city, usable_ratios):
     gdf.to_file(os.path.join(features_path, features_file), driver="GPKG", layer="features")
 
     print(f"Saved features to {features_file}")
+
 
 
