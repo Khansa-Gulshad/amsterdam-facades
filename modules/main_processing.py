@@ -20,7 +20,6 @@ gpd.options.io_engine = "fiona"
 # Prepare facade folders, create road network, and create features.
 # Returns the point features
 
-import math
 try:
     import numpy as np
 except Exception:
@@ -369,6 +368,7 @@ def save_usable_wall_ratios(city, usable_ratios):
     gdf.to_file(os.path.join(features_path, features_file), driver="GPKG", layer="features")
 
     print(f"Saved features to {features_file}")
+
 
 
 
