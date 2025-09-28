@@ -42,8 +42,9 @@ def create_features(
     else:
         num_sample_images = int(num_sample_images)
 
-    begin = int(begin or 0)
-    end = int(end) if (end is not None and str(end).strip() != "") else None
+    # robust to None, inf, NaN, strings
+    begin = 0 if (begin is None or (isinstance(begin, float) and math.isinf(begin))) else int(begin)
+    end   = None if (end   is None or (isinstance(end,   float) and math.isinf(end))) else int(end)
 
     try:
         i = int(i)
@@ -337,3 +338,4 @@ def save_usable_wall_ratios(city, usable_ratios):
     gdf.to_file(os.path.join(features_path, features_file), driver="GPKG", layer="features")
 
     print(f"Saved features to {features_file}")
+
