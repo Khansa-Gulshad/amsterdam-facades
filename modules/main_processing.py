@@ -18,6 +18,55 @@ gpd.options.io_engine = "fiona"
 # Returns the point features
 # Prepare facade folders, create road network, and create features.
 # Returns the point features
+
+import math
+try:
+    import numpy as np
+except Exception:
+    np = None
+
+def _is_inf(x):
+    try:
+        if isinstance(x, float) and math.isinf(x):
+            return True
+    except Exception:
+        pass
+    try:
+        if np is not None and bool(np.isinf(x)):
+            return True
+    except Exception:
+        pass
+    # strings like "inf"
+    try:
+        if str(x).strip().lower() in ("inf", "+inf", "infinity"):
+            return True
+    except Exception:
+        pass
+    return False
+
+def _to_int_or_default(x, default=None):
+    if x is None or _is_inf(x):
+        return default
+    try:
+        return int(x)
+    except Exception:
+        try:
+            return int(float(x))
+        except Exception:
+            return default
+
+# ---- sanitize numerics ----
+distance = _to_int_or_default(distance, 50)
+
+if _is_inf(num_sample_images) or num_sample_images is None:
+    num_sample_images = 10**9
+else:
+    num_sample_images = _to_int_or_default(num_sample_images, 10**6)
+
+begin = _to_int_or_default(begin, 0)
+end   = _to_int_or_default(end, None)
+i     = _to_int_or_default(i, 0)
+
 def create_features(
     city,
     access_token,
@@ -338,4 +387,5 @@ def save_usable_wall_ratios(city, usable_ratios):
     gdf.to_file(os.path.join(features_path, features_file), driver="GPKG", layer="features")
 
     print(f"Saved features to {features_file}")
+
 
