@@ -5,323 +5,335 @@ import random
 import math
 from geojson import Feature, FeatureCollection
 import fiona
+from PIL import Image
+import requests
+import geopandas as gpd
+
+# Use Fiona for writes so layer= is supported and no pyogrio 'crs' issue
+gpd.options.io_engine = "fiona"
 
 # Function adapted from iabrilvzqz
 # GitHub: https://github.com/Spatial-Data-Science-and-GEO-AI-Lab/StreetView-NatureVisibility-GSV
 # Prepare facade folders, create road network, and create features. 
 # Returns the point features
-def create_features(city, access_token, distance, num_sample_images, begin, end, save_roads_points, bbox=None, i=0):
-    print(f"Creating features for city {city}")  # Debug statement
-    # Create file paths for roads and points
+# Prepare facade folders, create road network, and create features.
+# Returns the point features
+def create_features(
+    city,
+    access_token,
+    distance,
+    num_sample_images,
+    begin,
+    end,
+    save_roads_points,
+    bbox=None,
+    i=0,
+):
+    print(f"Creating features for city {city}")
+
+    # ---- sanitize numerics ----
+    try:
+        distance = int(distance)
+    except Exception:
+        distance = 50
+
+    if num_sample_images in (None, float("inf")):
+        num_sample_images = 10**9
+    else:
+        num_sample_images = int(num_sample_images)
+
+    begin = int(begin or 0)
+    end = int(end) if (end is not None and str(end).strip() != "") else None
+
+    try:
+        i = int(i)
+    except Exception:
+        i = 0
+
+    # Explicit layer names for GPKG
+    features_layer = f"points_{i}"
+    roads_layer = f"roads_{i}"
+
+    # File paths
     file_path_features = os.path.join("results", city, "points", f"points_{i}.gpkg")
     file_path_road = os.path.join("results", city, "roads", f"roads_{i}.gpkg")
 
     if not os.path.exists(file_path_features):
-        # Get the sample points and the features assigned to each point
-        # Use city name only (no bbox)
-        road = get_road_network(city)
+        # ---- get roads (supports repos with or without bbox arg) ----
+        try:
+            road = get_road_network(city, bbox=bbox)
+        except TypeError:
+            # fall back to city-only
+            road = get_road_network(city)
 
-        # Debug prints to check if roads are fetched
-        print(f"Total roads found: {len(road)}")  # Check the length of roads fetched
+        # Debug
+        try:
+            print(f"Total roads found: {len(road)}")
+        except Exception:
+            print("Total roads found: <unknown>")
 
-        if len(road) == 0:
+        # If there are no roads, return empty GeoDataFrame
+        if (road is None) or (hasattr(road, "empty") and road.empty) or (hasattr(road, "__len__") and len(road) == 0):
             print(f"No roads found for city {city}. Continuing...")
-            return gpd.GeoDataFrame()  # Return an empty GeoDataFrame
-
-        # If there are no roads, there are no features too
-        if road.empty:
             return gpd.GeoDataFrame()
 
-        # Save road in gpkg file
-        road["index"] = road.index
+        # Normalize dtypes (safe)
+        if "index" not in road.columns:
+            road["index"] = road.index
         road["index"] = road["index"].astype(str)
-        road["highway"] = road["highway"].astype(str)
-        road["length"] = road["length"].astype(float)
-        road["road_angle"] = road["road_angle"].astype(float)
+        if "highway" in road.columns:
+            road["highway"] = road["highway"].astype(str)
+        if "length" in road.columns:
+            road["length"] = road["length"].astype(float)
+        if "road_angle" in road.columns:
+            road["road_angle"] = road["road_angle"].astype(float)
 
         # Create features from the sample points
         points = select_points_on_road_network(road, distance)
         features = get_features_on_points(points, road, access_token, distance)
 
-        # Save the roads and features if necessary
+        # Save roads & features if requested
         if save_roads_points:
-            road[["index", "geometry", "length", "highway", "road_angle"]].to_file(file_path_road, driver="GPKG", crs=road.crs)
-            features.to_file(file_path_features, driver="GPKG")
+            # IMPORTANT: do not pass crs= here; let GeoDataFrame carry it
+            road.to_file(file_path_road, driver="GPKG", layer=roads_layer)
+            features.to_file(file_path_features, driver="GPKG", layer=features_layer)
+
     else:
-        # If the points file already exists, then we use it to continue with the analysis
-        features = gpd.read_file(file_path_features, layer=f"points_{i}")
+        # If already saved, read that layer
+        features = gpd.read_file(file_path_features, layer=features_layer)
 
-    # Set True for n randomly selected rows to analyze their images later
-    sample_indices = random.sample(range(len(features)), min(num_sample_images, len(features)))
+    # Sample a subset to analyze
+    k = int(min(num_sample_images, len(features)))
+    if k > 0:
+        sample_indices = random.sample(range(len(features)), k)
+    else:
+        sample_indices = []
+
     features["save_sample"] = False
-    features.loc[sample_indices, "save_sample"] = True
+    if sample_indices:
+        features.loc[sample_indices, "save_sample"] = True
 
-    features = features.sort_values(by='id')
+    if "id" in features.columns:
+        features = features.sort_values(by="id")
 
-    # If we include a begin and end value, then the dataframe is split and we are going to analyse just those points
-    if begin != None and end != None:
-        features = features.iloc[begin:end]
-    
+    # Optional subrange
+    if (begin is not None) and (end is not None):
+        features = features.iloc[begin : (end if end is not None else None)]
+
     return features
 
 
 # For each feature, calculates the facade greening potential score (GPS).
 # Returns a list of GeoJSON features.
-def calculate_usable_wall_ratios(features, city, sam, access_token, save_streetview, bbox_i="0"):
-  # Get Mapillary header
-  header = {'Authorization': 'OAuth {}'.format(access_token)}
+def calculate_usable_wall_ratios(features, city, sam, access_token, save_streetview, bbox_i=0):
+    # Keep bbox_i as int internally; use string only for folder suffix
+    try:
+        bbox_i_int = int(bbox_i)
+    except Exception:
+        bbox_i_int = 0
+    suffix = str(bbox_i_int)
 
-  # Initialize output list
-  usable_ratio = []
+    # Mapillary header
+    header = {"Authorization": f"OAuth {access_token}"}
 
-  # Initialize output directories of segmentations
-  facades_dir = os.path.join("results", city, "temp_seg_facades")
-  windows_dir = os.path.join("results", city, "temp_seg_windows")
+    usable_ratio = []
 
-  # Calculate the ratio of usable wall surface for each street view image (SVI)
-  for index, row in features.iterrows():
-      if row["save_sample"] == True:
+    # temp seg output dirs
+    facades_dir = os.path.join("results", city, "temp_seg_facades")
+    windows_dir = os.path.join("results", city, "temp_seg_windows")
 
-          # Get info from SVI URL by concatenating parameter fields
-          # Note: does not prevent duplicate image
-          image_id = row["image_id"]
-          url = f'https://graph.mapillary.com/{image_id}?fields=\
-                  camera_parameters,\
-                  camera_type,\
-                  captured_at,\
-                  compass_angle,\
-                  computed_geometry,\
-                  computed_rotation,\
-                  thumb_original_url'
+    for index, row in features.iterrows():
+        if row.get("save_sample", False):
 
-          # Send a GET request to the Mapillary API to obtain SVI information
-          try:
-            response = requests.get(url, headers=header)
-            data = response.json()
-          except:
-            print("Error retrieving image data. Skipping sample.")
-            continue
+            image_id = row["image_id"]
+            url = (
+                f"https://graph.mapillary.com/{image_id}?fields="
+                "camera_parameters,camera_type,captured_at,compass_angle,"
+                "computed_geometry,computed_rotation,thumb_original_url"
+            )
 
-          try:
-            image_url = data["thumb_original_url"]
-            camera_angle = data["compass_angle"] if "compass_angle" in data else None  # Handle missing compass_angle
-            # Location is GeoJSON Point
-            location = data["computed_geometry"]
+            # Fetch metadata
+            try:
+                response = requests.get(url, headers=header, timeout=20)
+                response.raise_for_status()
+                data = response.json()
+            except Exception:
+                print("Error retrieving image data. Skipping sample.")
+                continue
 
-            # Get yaw (up/down) angle. Range: -pi to +pi radians
-            computed_rotation = data["computed_rotation"]
-            yaw = computed_rotation[1]
-          except KeyError:
-            print(f"Image invalid: missing attributes")
-            continue
+            try:
+                image_url = data["thumb_original_url"]
+                camera_angle = data.get("compass_angle", None)
+                location = data["computed_geometry"]
+                computed_rotation = data["computed_rotation"]
+                yaw = computed_rotation[1]
+            except KeyError:
+                print("Image invalid: missing attributes")
+                continue
 
-          # Makes sure the location is skipped if image angle > 45 degrees
-          if yaw < -0.25 * math.pi or yaw > 0.25 * math.pi:
-            print(f"Image invalid: yaw too high ({yaw})")
-            continue
+            # filter on yaw
+            if yaw < -0.25 * math.pi or yaw > 0.25 * math.pi:
+                print(f"Image invalid: yaw too high ({yaw})")
+                continue
 
-          # Extract road angle and panoramic property from dataframe
-          road_angle = float(row["road_angle"] if not math.isnan(row["road_angle"]) else 0)
-          is_panoramic = bool(row["is_panoramic"])
+            road_angle = float(row["road_angle"]) if not math.isnan(row["road_angle"]) else 0.0
+            is_panoramic = bool(row["is_panoramic"])
 
-          # Return list of processed image(s)
-          images = process_image(image_url, is_panoramic, road_angle)
+            # Get one or two perp-view images
+            images = process_image(image_url, is_panoramic, road_angle)
 
-          # Create segmentation masks of facades and windows using SAM
-          segment_images(sam, images, city, index, save_streetview)
+            # Segment
+            segment_images(sam, images, city, index, save_streetview)
 
-          # Get pixel ratio of usable facade compared to total facade
-          # We use file names to find matching segmentations in the temp folders
-          facade_segs, windows_segs = load_images(facades_dir, windows_dir)
+            # Gather seg masks
+            facades_segs, windows_segs = load_images(facades_dir, windows_dir)
 
-          widths = []
-          heights = []
-          ratios = []
-          
-          # Check if there are facade and window segmentations
-          # if at least one is missing, we can determine the WAR (GPS) directly
-          ratio_left, ratio_right = None, None
+            widths, heights, ratios = [], [], []
 
-          if (not facade_segs and not windows_segs) or (not facade_segs):
-            print("Invalid: No facades (or windows) detected.")
+            # default ratio if nothing detected
             ratio = 0
-          elif not windows_segs:
-            print("No windows detected")
-            ratio = 1
-          # There is at least one segmentation, so continue
-          else:
-            if not is_panoramic:
-              # Non-panoramic images always have 1 facade and 1 window seg by now
-              for image_name in facade_segs:
-                if image_name in windows_segs:
 
-                  with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
-                    facades_count_total = count_white_pixels(facades_seg)
-                    width, height = facades_seg.size
+            if (not facades_segs and not windows_segs) or (not facades_segs):
+                print("Invalid: No facades (or windows) detected.")
+                ratio = 0
 
-                  with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
-                    windows_count_total = count_white_pixels(windows_seg)
+            elif not windows_segs:
+                print("No windows detected")
+                ratio = 1
 
-                  # Get pixel ratio of usable facade compared to total facade
-                  ratio = (facades_count_total - windows_count_total) / facades_count_total \
-                          if (facades_count_total - windows_count_total) > 0 else 0
-
-                  # Get ratio, width, height for left and right image
-                  widths.append(width)
-                  heights.append(height)
-                  ratios.append(ratio)
-            # Panoramic images can have 1,1, 1,2, 2,1, 2,2 segs by this point
             else:
-              n_facade_segs = len(facade_segs)
-              n_windows_segs = len(windows_segs)
+                if not is_panoramic:
+                    # expect one matching pair
+                    for image_name in facades_segs:
+                        if image_name in windows_segs:
+                            with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
+                                facades_count_total = count_white_pixels(facades_seg)
+                                width, height = facades_seg.size
+                            with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
+                                windows_count_total = count_white_pixels(windows_seg)
 
-              # Loop over the longest (or equal size) list so we don't miss any segmentations when name-matching
-              if n_facade_segs >= n_windows_segs:
-                # Check if there is a matching name for this seg
-                for image_name in facade_segs:
-                  if image_name in windows_segs:
+                            ratio = (
+                                (facades_count_total - windows_count_total) / facades_count_total
+                                if (facades_count_total - windows_count_total) > 0
+                                else 0
+                            )
+                            widths.append(width); heights.append(height); ratios.append(ratio)
 
-                    with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
-                      facades_count_total = count_white_pixels(facades_seg)
-                      width, height = facades_seg.size
+                else:
+                    n_f = len(facades_segs); n_w = len(windows_segs)
 
-                    with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
-                      windows_count_total = count_white_pixels(windows_seg)
+                    if n_f >= n_w:
+                        for image_name in facades_segs:
+                            if image_name in windows_segs:
+                                with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
+                                    facades_count_total = count_white_pixels(facades_seg)
+                                    width, height = facades_seg.size
+                                with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
+                                    windows_count_total = count_white_pixels(windows_seg)
 
-                    # Get pixel ratio of usable facade compared to total facade
-                    ratio = (facades_count_total - windows_count_total) / facades_count_total \
-                            if (facades_count_total - windows_count_total) > 0 else 0
+                                ratio = (
+                                    (facades_count_total - windows_count_total) / facades_count_total
+                                    if (facades_count_total - windows_count_total) > 0
+                                    else 0
+                                )
+                                widths.append(width); heights.append(height); ratios.append(ratio)
+                            else:
+                                with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
+                                    facades_count_total = count_white_pixels(facades_seg)
+                                    width, height = facades_seg.size
+                                windows_count_total = 0
+                                print("Missing window segmentation. Window area: 0")
+                                ratio = (
+                                    (facades_count_total - windows_count_total) / facades_count_total
+                                    if (facades_count_total - windows_count_total) > 0
+                                    else 0
+                                )
+                                widths.append(width); heights.append(height); ratios.append(ratio)
+                    else:
+                        for image_name in windows_segs:
+                            if image_name in facades_segs:
+                                with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
+                                    windows_count_total = count_white_pixels(windows_seg)
+                                    width, height = windows_seg.size
+                                with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
+                                    facades_count_total = count_white_pixels(facades_seg)  # <-- fixed typo
 
-                    # Get ratio, width, height for left and right image
-                    widths.append(width)
-                    heights.append(height)
-                    ratios.append(ratio)
-                  # If there is no matching name, set the count of the missing window seg to 0
-                  else:
-                    with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
-                      facades_count_total = count_white_pixels(facades_seg)
-                      width, height = facades_seg.size
+                                ratio = (
+                                    (facades_count_total - windows_count_total) / facades_count_total
+                                    if (facades_count_total - windows_count_total) > 0
+                                    else 0
+                                )
+                                widths.append(width); heights.append(height); ratios.append(ratio)
+                            else:
+                                with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
+                                    windows_count_total = count_white_pixels(windows_seg)
+                                    width, height = windows_seg.size
+                                facades_count_total = 0
+                                print("Missing facade segmentation. Facade area: 0")
+                                ratio = (
+                                    (facades_count_total - windows_count_total) / facades_count_total
+                                    if (facades_count_total - windows_count_total) > 0
+                                    else 0
+                                )
+                                widths.append(width); heights.append(height); ratios.append(ratio)
 
-                    windows_count_total = 0
-                    print("Missing window segmentation. Window area: 0")
+            # Compute WAR
+            try:
+                ratio_left, ratio_right = ratios[0], ratios[1]
+                width_left, width_right = widths[0], widths[1]
+                height_left, height_right = heights[0], heights[1]
+                WAR = calculate_WAR(width_left, height_left, ratio_left, width_right, height_right, ratio_right)
+            except Exception:
+                # non-pano or only one seg → fall back to single-image ratio
+                ratio_left, ratio_right = (ratios[0], ratios[1]) if len(ratios) >= 2 else (None, None)
+                WAR = ratios[0] if ratios else ratio
 
-                    # Get pixel ratio of usable facade compared to total facade
-                    ratio = (facades_count_total - windows_count_total) / facades_count_total \
-                            if (facades_count_total - windows_count_total) > 0 else 0
+            # Move masks to per-bbox folders
+            prepare_folder(city, os.path.join("seg_facades", suffix))
+            facades_destination = os.path.join("results", city, "seg_facades", suffix)
+            move_files(facades_dir, facades_destination)
 
-                    # Ratio, width, height for left and right image
-                    widths.append(width)
-                    heights.append(height)
-                    ratios.append(ratio)
-              else:
-                # Switch the name-matching order so we don't miss matches
-                for image_name in windows_segs:
-                  if image_name in facade_segs:
+            prepare_folder(city, os.path.join("seg_windows", suffix))
+            windows_destination = os.path.join("results", city, "seg_windows", suffix)
+            move_files(windows_dir, windows_destination)
 
-                    with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
-                      windows_count_total = count_white_pixels(windows_seg)
-                      width, height = windows_seg.size
+            # Save one feature
+            usable_ratio.append(
+                Feature(
+                    geometry=location,
+                    properties={
+                        "ratio_left": ratio_left,
+                        "ratio_right": ratio_right,
+                        "GPS": round(WAR, 2),
+                        "image_url": image_url,
+                        "camera_angle": camera_angle,
+                        "road_angle": road_angle,
+                        "idx": int(index),
+                    },
+                )
+            )
 
-                    with Image.open(f"{facades_dir}/{image_name}") as facades_seg:
-                      facades_count_total = count_white_pixels(windows_seg)
-
-                    # Get pixel ratio of usable facade compared to total facade
-                    ratio = (facades_count_total - windows_count_total) / facades_count_total \
-                            if (facades_count_total - windows_count_total) > 0 else 0
-
-                    # Ratio, width, height for left and right image
-                    widths.append(width)
-                    heights.append(height)
-                    ratios.append(ratio)
-                  # If there is no matching name, set the count of the missing facade seg to 0
-                  else:
-                    with Image.open(f"{windows_dir}/{image_name}") as windows_seg:
-                      windows_count_total = count_white_pixels(windows_seg)
-                      width, height = windows_seg.size
-
-                    facades_count_total = 0
-                    print("Missing facade segmentation. Facade area: 0")
-
-                    # Get pixel ratio of usable facade compared to total facade
-                    ratio = (facades_count_total - windows_count_total) / facades_count_total \
-                            if (facades_count_total - windows_count_total) > 0 else 0
-
-                    # Get ratio, width, height for left and right image
-                    widths.append(width)
-                    heights.append(height)
-                    ratios.append(ratio)
-
-          # Save usable ratios
-          try:
-            ratio_left, ratio_right = ratios[0], ratios[1]
-            width_left, width_right = widths[0], widths[1]
-            height_left, height_right = heights[0], heights[1]
-
-            # Calculate the Weighted Average Ratio (GPS) of this sample point
-            WAR = calculate_WAR(width_left, height_left, ratio_left, width_right, height_right, ratio_right)
-          except IndexError:
-            print("Index error (non-panoramic or no segmentation).")
-            ratio_left, ratio_right = None, None        
-            # If the image is panoramic (or no segs), the WAR is equal to the ratio of that image
-            WAR = ratio
-
-          # Move all masks to their non-temporary folders after analysis so the analysis path is clear
-          prepare_folder(city, os.path.join("seg_facades", bbox_i))
-          facades_destination = os.path.join("results", city, "seg_facades", bbox_i)
-          move_files(facades_dir, facades_destination)
-
-          prepare_folder(city, os.path.join("seg_windows", bbox_i))
-          windows_destination = os.path.join("results", city, "seg_windows", bbox_i)
-          move_files(windows_dir, windows_destination)
-
-          # Save the usable ratio as a feature
-          usable_ratio.append(Feature(geometry = location, properties = {"ratio_left": ratio_left,
-                                                                        "ratio_right": ratio_right,
-                                                                        "GPS": round(WAR, 2),
-                                                                        "image_url": image_url,
-                                                                        "camera_angle": camera_angle,
-                                                                        "road_angle": road_angle,
-                                                                        "idx": index}))
-
-  return usable_ratio
+    return usable_ratio
 
 
-
-# Save the usable ratios as a geopackage file
-# Save the usable ratios as a geopackage file
 def save_usable_wall_ratios(city, usable_ratios):
-    # Check if usable_ratios is empty
-    print(len(usable_ratios))  # Check if it's empty
+    print(len(usable_ratios))
     if len(usable_ratios) == 0:
         print("No usable ratios found. Nothing to save.")
-        return  # Exit the function if no usable ratios
+        return
 
-    # If usable_ratios is not empty, continue with saving the file
     feature_collection = FeatureCollection(usable_ratios)
-
-    # Convert the feature collection to a GeoDataFrame
     gdf = gpd.GeoDataFrame.from_features(feature_collection["features"])
 
-    # Check the GeoDataFrame to ensure it's correct
-    print(gdf.head())  # Check the first few rows
-    print(gdf.crs)  # Check the CRS
+    # Ensure CRS on the GeoDataFrame, then write (no crs= in to_file)
+    if gdf.crs is None:
+        gdf = gdf.set_crs(4326)
 
-    # Set the CRS to EPSG:4326
-    gdf.set_crs('EPSG:4326', allow_override=True, inplace=True)
-
-    # Check if CRS has been set correctly
-    print(gdf.crs)  # Double-check the CRS
-
-    # Proceed with saving the GeoDataFrame to a geopackage file
-    features_file = f'{city}_features.gpkg'
+    features_file = f"{city}_features.gpkg"
     features_path = os.path.join("results", city)
+    os.makedirs(features_path, exist_ok=True)
 
-    # Check if the features directory exists, if not, create it
-    if not os.path.exists(features_path):
-        os.makedirs(features_path)
-
-    # Save the GeoDataFrame as a geopackage file
-    gdf.to_file(f'{features_path}/{features_file}', driver="GPKG", engine="fiona")
+    # Write with explicit layer name for clarity
+    gdf.to_file(os.path.join(features_path, features_file), driver="GPKG", layer="features")
 
     print(f"Saved features to {features_file}")
-
